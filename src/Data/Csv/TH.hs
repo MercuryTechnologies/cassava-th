@@ -1,4 +1,4 @@
-{-# language TemplateHaskell #-}
+{-# language CPP, TemplateHaskell #-}
 
 -- | This module provides @TemplateHaskell@ support for the @cassava@
 -- library, so you can avoid deriving 'Generic' and the compilation
@@ -18,6 +18,7 @@ module Data.Csv.TH
   )
 where
 
+import Control.Applicative (liftA2)
 import Data.Traversable
 import Control.Monad
 import Control.Monad.Fail
@@ -38,15 +39,16 @@ csvDefaultOptions = Csv.defaultOptions
 -- 'Csv.DefaultOrdered', sharing the same options.
 deriveToNamedRecordAndDefaultOrdered :: Csv.Options -> Name -> DecsQ
 deriveToNamedRecordAndDefaultOrdered opts name =
-  deriveToNamedRecord opts name <> deriveDefaultOrdered opts name
+  (<>) <$> deriveToNamedRecord opts name <*> deriveDefaultOrdered opts name
 
 -- | A helper for the common case of deriving 'Csv.ToNamedRecord',
 -- 'Csv.FromNamedRecord', and 'Csv.DefaultOrdered', sharing the same options.
 deriveToAndFromNamedRecordAndDefaultOrdered :: Csv.Options -> Name -> DecsQ
-deriveToAndFromNamedRecordAndDefaultOrdered opts name =
-  deriveToNamedRecord opts name
-    <> deriveDefaultOrdered opts name
-    <> deriveFromNamedRecord opts name
+deriveToAndFromNamedRecordAndDefaultOrdered opts name = do
+  a <- deriveToNamedRecord opts name
+  b <- deriveDefaultOrdered opts name
+  c <- deriveFromNamedRecord opts name
+  pure (a <> b <> c)
 
 -- | Derives a 'Csv.ToNamedRecord' instance for a given type.
 deriveToNamedRecord :: Csv.Options -> Name -> DecsQ
@@ -89,7 +91,7 @@ deriveToNamedRecord opts typName = do
         namesWithPatterns <- for fields \(fieldName, _, _) -> do
           FieldName fieldName <$> newName (nameBase fieldName)
 
-        pure (ConP constrName [] (map (VarP . fieldPatternVariable) namesWithPatterns), namesWithPatterns)
+        pure (mkConP constrName (map (VarP . fieldPatternVariable) namesWithPatterns), namesWithPatterns)
       _ ->
         fail $
           concat
@@ -161,7 +163,7 @@ deriveToRecord typName = do
             for names \name ->
               [e|Csv.toField $(varE name)|]
         let constrPattern =
-              ConP constrName [] (map VarP names)
+              mkConP constrName (map VarP names)
         pure $ Match constrPattern (NormalB exprBody) []
       RecC constrName varBangTypes -> do
         names <- for varBangTypes \(name, _, _) -> newName (nameBase name)
@@ -170,7 +172,7 @@ deriveToRecord typName = do
             for names \name ->
               [e|Csv.toField $(varE name)|]
         let constrPattern =
-              ConP constrName [] (map VarP names)
+              mkConP constrName (map VarP names)
         pure $ Match constrPattern (NormalB exprBody) []
       _ ->
         fail $
@@ -245,7 +247,7 @@ deriveDefaultOrdered opts typName = do
 -- for a record type.
 deriveNamedRecord :: CsvOptions -> Name -> DecsQ
 deriveNamedRecord opts typName =
-  deriveToNamedRecord opts typName <> deriveFromNamedRecord opts typName
+  liftA2 (<>) (deriveToNamedRecord opts typName) (deriveFromNamedRecord opts typName)
 
 -- | Derive an instance of 'Csv.FromNamedRecord' for record types.
 deriveFromNamedRecord :: CsvOptions -> Name -> DecsQ
@@ -387,5 +389,13 @@ deriveFromRecord typName = do
 
 deriveToAndFromRecord :: Name -> DecsQ
 deriveToAndFromRecord name =
-  deriveToRecord name <> deriveFromRecord name
+  liftA2 (<>) (deriveToRecord name) (deriveFromRecord name)
+
+#if MIN_VERSION_template_haskell(2,18,0)
+mkConP :: Name -> [Pat] -> Pat
+mkConP name pats = ConP name [] pats
+#else
+mkConP :: Name -> [Pat] -> Pat
+mkConP name pats = ConP name pats
+#endif
 
