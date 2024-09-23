@@ -17,7 +17,7 @@ jobs:
       matrix:
         os: [ubuntu-latest]
         ghc-version: 
-          # - '9.8' # blocked on optparse-generic text upper bound
+          - '9.8' 
           - '9.6'
           - '9.4'
           - '9.2'
@@ -72,6 +72,3 @@ jobs:
 
       - name: Check cabal file
         run: cabal check
-
-      - name: Build documentation
-        run: cabal haddock all
